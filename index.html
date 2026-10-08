@@ -626,6 +626,7 @@ const DB = {
 
     // 2) 没有本地数据,初始化种子
     if (!this.data) { this.data = this.seed(); }
+    this._repairData();
 
     // 3) 独立模式或无 token,不拉云端
     if (!this.token || this.token.startsWith('local-')) return;
@@ -635,6 +636,7 @@ const DB = {
         const j = await r.json();
         if (j.ok && j.data && Object.keys(j.data).length > 0) {
           this.data = j.data;
+          this._repairData();
           this.online = true;
           this._persistLocal();
           this._log('pull', true, '已从云端拉取最新数据');
@@ -659,6 +661,12 @@ const DB = {
   _persistLocal() {
     try { localStorage.setItem(this.KEY, JSON.stringify(this.data)); }
     catch (e) { console.warn('本地缓存写入失败', e); }
+  },
+
+  // 修复历史数据:补齐缺失的 id(旧版"记一笔"生成的流水无 id,导致无法编辑/删除)
+  _repairData() {
+    if (!this.data) return;
+    (this.data.transactions || []).forEach(t => { if (!t.id) t.id = uid('tx'); });
   },
 
   // 保存:本地立刻落盘 + 防抖同步到云端(避免高频修改打爆 API)
@@ -1755,6 +1763,7 @@ const Bookkeeping = {
         if (!d.amount || d.amount <= 0) { UI.toast('金额必须大于0', 'error'); return; }
         if (!d.categoryId) { UI.toast('请选择分类', 'warn'); return; }
         const obj = Object.assign({}, t, d, { companyId: cid, createdBy: Auth.user.id, createdAt: t.createdAt || dates.now() });
+        if (!obj.id) obj.id = uid('tx');
         obj.bills = t.bills || [];
         if (id) DB.update(obj, 'transactions'); else DB.add(obj, 'transactions');
         UI.toast(id ? '已修改' : '已记账', 'success');
