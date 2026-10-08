@@ -872,14 +872,14 @@ const DB = {
     return userObj.companyId ? [userObj.companyId] : [];
   },
   reset() {
-    if (confirm('确定要清空所有数据并恢复演示数据吗?此操作不可撤销!')) {
+    UI.confirm('确定要清空所有数据并恢复演示数据吗?<br><span style="color:var(--c-text-3);">重置前会自动生成快照,误操作可在「本地快照」里恢复。</span>', () => {
       Backup.create('before-danger'); // 重置前强制快照,误操作可恢复
       localStorage.removeItem(this.KEY);
       this.data = this.seed();
       this.save();
       UI.toast('已重置为演示数据', 'success');
       App.render();
-    }
+    }, { title: '重置数据', okText: '重置' });
   },
   export() {
     const blob = new Blob([JSON.stringify(this.data, null, 2)], { type: 'application/json' });
@@ -1433,30 +1433,30 @@ const App = {
       // 新增 6 个模块的 action
       'cust-new': () => Customers.form(),
       'cust-edit': () => Customers.form(id),
-      'cust-del': () => { if (confirm('删除该客户?')) { DB.remove(id, 'customers'); UI.toast('已删除', 'success'); App.render(); } },
+      'cust-del': () => UI.confirm('确定删除该客户吗?', () => { if (DB.remove(id, 'customers')) { UI.toast('已删除', 'success'); App.render(); } }),
       'sup-new': () => Suppliers.form(),
       'sup-edit': () => Suppliers.form(id),
-      'sup-del': () => { if (confirm('删除该供应商?')) { DB.remove(id, 'suppliers'); UI.toast('已删除', 'success'); App.render(); } },
+      'sup-del': () => UI.confirm('确定删除该供应商吗?', () => { if (DB.remove(id, 'suppliers')) { UI.toast('已删除', 'success'); App.render(); } }),
       'ct-new': () => Contracts.form(),
       'ct-edit': () => Contracts.form(id),
-      'ct-del': () => { if (confirm('删除该合同?')) { DB.remove(id, 'contracts'); UI.toast('已删除', 'success'); App.render(); } },
+      'ct-del': () => UI.confirm('确定删除该合同吗?', () => { if (DB.remove(id, 'contracts')) { UI.toast('已删除', 'success'); App.render(); } }),
       'ct-pay': () => Contracts.pay(id),
       'dl-new': () => DailyLogs.form(),
       'dl-edit': () => DailyLogs.form(id),
-      'dl-del': () => { if (confirm('删除该日报?')) { DB.remove(id, 'dailyLogs'); UI.toast('已删除', 'success'); App.render(); } },
+      'dl-del': () => UI.confirm('确定删除该日报吗?', () => { if (DB.remove(id, 'dailyLogs')) { UI.toast('已删除', 'success'); App.render(); } }),
       'iv-new-in': () => Inventory.form(null, 'in'),
       'iv-new-out': () => Inventory.form(null, 'out'),
       'iv-edit': () => Inventory.form(id),
-      'iv-del': () => { if (confirm('删除该库存记录?')) { DB.remove(id, 'inventory'); UI.toast('已删除', 'success'); App.render(); } },
+      'iv-del': () => UI.confirm('确定删除该库存记录吗?', () => { if (DB.remove(id, 'inventory')) { UI.toast('已删除', 'success'); App.render(); } }),
       'inv2-new': () => Invoices.form(),
       'inv2-edit': () => Invoices.form(id),
-      'inv2-del': () => { if (confirm('删除该发票?')) { DB.remove(id, 'invoices'); UI.toast('已删除', 'success'); App.render(); } },
+      'inv2-del': () => UI.confirm('确定删除该发票吗?', () => { if (DB.remove(id, 'invoices')) { UI.toast('已删除', 'success'); App.render(); } }),
       'veh-new': () => Vehicles.form(),
       'veh-edit': () => Vehicles.form(id),
-      'veh-del': () => { if (confirm('删除该车辆?')) { DB.remove(id, 'vehicles'); UI.toast('已删除', 'success'); App.render(); } },
+      'veh-del': () => UI.confirm('确定删除该车辆吗?', () => { if (DB.remove(id, 'vehicles')) { UI.toast('已删除', 'success'); App.render(); } }),
       'fuel-new': () => FuelLogs.form(),
       'fuel-edit': () => FuelLogs.form(id),
-      'fuel-del': () => { if (confirm('删除该加油记录?')) { DB.remove(id, 'fuelLogs'); UI.toast('已删除', 'success'); App.render(); } },
+      'fuel-del': () => UI.confirm('确定删除该加油记录吗?', () => { if (DB.remove(id, 'fuelLogs')) { UI.toast('已删除', 'success'); App.render(); } }),
       'cat-add': () => Settings.catForm(),
       'cat-del': () => Settings.delCat(id),
       'co-edit': () => Settings.companyForm(id),
