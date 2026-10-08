@@ -1,5 +1,5 @@
 /* 熠徽账务 PWA Service Worker：离线缓存 */
-const CACHE = 'yihui-v2';
+const CACHE = 'yihui-v3';
 const ASSETS = [
   './',
   './index.html',
