@@ -206,6 +206,24 @@ table.data tr:last-child td{border-bottom:none;}
 .cell-amount.income{color:var(--c-green);}
 .cell-amount.expense{color:var(--c-red);}
 .cell-note{color:var(--c-text-2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* 流水日期分组行 */
+table.data tr.day-row td{background:var(--c-bg);padding:8px 12px;font-size:12px;}
+table.data tr.day-row td b{font-size:13px;}
+.day-sum{color:var(--c-text-3);margin-left:8px;font-size:11px;}
+.day-row .tag{margin-left:6px;}
+/* 窄屏(手机)优化 */
+table.data td:last-child{white-space:nowrap;}
+@media(max-width:640px){
+  table.data{font-size:12px;}
+  table.data th{padding:8px;font-size:11px;}
+  table.data td{padding:9px 8px;}
+  .cell-note{max-width:130px;}
+  .btn-sm{padding:4px 9px;}
+  .modal-mask{padding:10px;align-items:flex-end;}
+  .modal{max-height:92vh;border-radius:16px 16px 0 0;}
+  .modal-foot{padding:12px 14px;}
+  .modal-foot .btn{flex:1;justify-content:center;padding:11px 14px;font-size:14px;}
+}
 
 .tag{
   display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;
@@ -673,6 +691,7 @@ const DB = {
   save() {
     this._persistLocal();
     this._dirty = true;
+    Backup.autosave(); // 每天首次改动自动快照一次
     // 独立模式(本地 token)不需要云端同步
     if (this.token && this.token.startsWith('local-')) return;
     if (this._saveTimer) clearTimeout(this._saveTimer);
@@ -854,6 +873,7 @@ const DB = {
   },
   reset() {
     if (confirm('确定要清空所有数据并恢复演示数据吗?此操作不可撤销!')) {
+      Backup.create('before-danger'); // 重置前强制快照,误操作可恢复
       localStorage.removeItem(this.KEY);
       this.data = this.seed();
       this.save();
@@ -875,6 +895,7 @@ const DB = {
       try {
         const obj = JSON.parse(r.result);
         if (!obj.companies || !obj.users) throw new Error('格式不对');
+        Backup.create('before-danger'); // 导入覆盖前强制快照
         this.data = obj;
         this.save();
         UI.toast('导入成功', 'success');
@@ -1149,7 +1170,7 @@ const UI = {
       }
       const inputType = f.type || 'text';
       return `<div class="form-row"><label class="form-label">${f.label}${req}</label>
-        <input type="${inputType}" class="form-control" name="${f.key}" value="${val}" ${f.step ? `step="${f.step}"` : ''} ${f.placeholder ? `placeholder="${f.placeholder}"` : ''}>
+        <input type="${inputType}" class="form-control" name="${f.key}" value="${val}" ${f.step ? `step="${f.step}"` : ''} ${f.placeholder ? `placeholder="${f.placeholder}"` : ''} ${inputType === 'number' ? 'inputmode="decimal"' : ''}>
         ${f.hint ? `<div class="form-hint">${f.hint}</div>` : ''}</div>`;
     };
     const fieldRows = fields.map(f => {
@@ -1220,6 +1241,70 @@ const ImageUtil = {
       r.onerror = reject;
       r.readAsDataURL(file);
     });
+  },
+};
+
+/* ========== 本地快照备份(防丢数据) ========== */
+const Backup = {
+  KEY: 'yihui_backups_v1',
+  DAY_KEY: 'yihui_last_autobak',
+  MAX: 10,
+  REASON_LABEL: { auto: '自动', manual: '手动', 'before-danger': '操作前' },
+  list() {
+    try { return JSON.parse(localStorage.getItem(this.KEY)) || []; }
+    catch (e) { return []; }
+  },
+  _write(arr) {
+    try { localStorage.setItem(this.KEY, JSON.stringify(arr)); return true; }
+    catch (e) {}
+    // 存储空间不足时,逐步丢弃旧快照重试
+    while (arr.length > 1) {
+      arr.length = Math.floor(arr.length / 2);
+      try { localStorage.setItem(this.KEY, JSON.stringify(arr)); return true; } catch (e) {}
+    }
+    console.warn('快照写入失败:本机存储空间不足');
+    return false;
+  },
+  create(reason) {
+    let snapData;
+    try { snapData = JSON.stringify(DB.data); } catch (e) { return false; }
+    const arr = this.list();
+    const snap = { ts: Date.now(), reason: reason || 'manual', size: snapData.length, data: snapData };
+    // 同一天同一类型只保留最新一份
+    const day = fmt.dateFull(snap.ts);
+    const dup = arr.findIndex(b => b.reason === snap.reason && fmt.dateFull(b.ts) === day);
+    if (dup >= 0) arr.splice(dup, 1);
+    arr.unshift(snap);
+    while (arr.length > this.MAX) arr.pop();
+    return this._write(arr) ? snap : false;
+  },
+  autosave() {
+    const today = fmt.today();
+    let last = null;
+    try { last = localStorage.getItem(this.DAY_KEY); } catch (e) {}
+    if (last === today) return;
+    if (this.create('auto')) {
+      try { localStorage.setItem(this.DAY_KEY, today); } catch (e) {}
+    }
+  },
+  restore(ts) {
+    const hit = this.list().find(b => b.ts === ts);
+    if (!hit) return false;
+    try {
+      const obj = JSON.parse(hit.data);
+      if (!obj || !obj.companies || !obj.users) return false;
+      this.create('before-danger'); // 恢复前先快照当前数据,可反悔
+      const session = DB.data && DB.data.session;
+      DB.data = obj;
+      if (session) DB.data.session = session;
+      DB._repairData();
+      DB._persistLocal();
+      DB.save();
+      return true;
+    } catch (e) { return false; }
+  },
+  remove(ts) {
+    return this._write(this.list().filter(b => b.ts !== ts));
   },
 };
 
@@ -1380,8 +1465,25 @@ const App = {
       'user-edit': () => Settings.userForm(id),
       'user-del': () => Settings.delUser(id),
       'data-export': () => DB.export(),
-      'data-import': () => $('#hidden-file-input').click(),
+      'data-import': () => $('#app #hidden-file-input').click(),
       'data-reset': () => DB.reset(),
+      'bak-now': () => {
+        const r = Backup.create('manual');
+        if (r) { UI.toast(`已备份(${Math.round(r.size / 1024)}KB)`, 'success'); App.render(); }
+        else { UI.toast('备份失败:本机存储空间不足,请先导出JSON备份', 'error'); }
+      },
+      'bak-restore': () => {
+        const ts = Number(el.dataset.ts);
+        const b = Backup.list().find(x => x.ts === ts);
+        if (!b) return;
+        UI.confirm(`确定恢复到 <b>${fmt.datetime(ts)}</b> 的快照吗?<br><span style="color:var(--c-text-3);">恢复前会自动快照当前数据,可随时再恢复回来。</span>`, () => {
+          if (Backup.restore(ts)) { UI.toast('恢复成功', 'success'); App.render(); }
+          else { UI.toast('恢复失败:快照数据损坏', 'error'); }
+        }, { title: '恢复快照', okText: '恢复' });
+      },
+      'bak-del': () => {
+        UI.confirm('确定删除这份快照吗?', () => { Backup.remove(Number(el.dataset.ts)); UI.toast('已删除', 'success'); App.render(); });
+      },
     };
     if (actions[a]) { e.preventDefault(); actions[a](); }
   },
@@ -1437,7 +1539,7 @@ const App = {
             <div><div class="brand-name">熠徽建筑</div><div class="brand-sub">账务管理系统</div></div>
           </div>
           <nav class="sidebar-nav">${nav}</nav>
-          <div class="sidebar-foot">v1.0 · 数据本地存储<br>© ${new Date().getFullYear()} 熠徽建筑</div>
+          <div class="sidebar-foot">v1.1 · 数据本地存储+自动快照<br>© ${new Date().getFullYear()} 熠徽建筑</div>
         </aside>
         <div class="main">
           <header class="topbar">
@@ -1839,6 +1941,7 @@ VIEWS.bookkeeping = function () {
   const totalIn = list.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const totalOut = list.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
   const projs = DB.projects(cid);
+  let lastDate = '';
 
   return `
     <div class="content-padded">
@@ -1878,13 +1981,21 @@ VIEWS.bookkeeping = function () {
         <div class="table-wrap">
           ${list.length === 0 ? UI.empty('📭', '暂无符合条件的流水') : `
           <table class="data">
-            <tr><th>日期</th><th>类型</th><th>分类</th><th>项目</th><th>备注</th><th class="text-right">金额</th><th>票据</th>${Auth.can('bookkeeping') ? '<th>操作</th>' : ''}</tr>
+            <tr><th>类型</th><th>分类</th><th>项目</th><th>备注</th><th class="text-right">金额</th><th>票据</th>${Auth.can('bookkeeping') ? '<th>操作</th>' : ''}</tr>
             ${list.map(t => {
               const c = DB.category(t.companyId, t.type, t.categoryId) || { name: '其他', icon: '' };
               const p = DB.project(t.projectId);
               const billCount = DB.data.bills.filter(b => b.transactionId === t.id).length;
-              return `<tr>
-                <td>${fmt.dateFull(t.date)}</td>
+              const colN = 6 + (Auth.can('bookkeeping') ? 1 : 0);
+              let head = '';
+              if (t.date !== lastDate) {
+                lastDate = t.date;
+                const dayList = list.filter(x => x.date === t.date);
+                const dIn = dayList.filter(x => x.type === 'income').reduce((s, x) => s + x.amount, 0);
+                const dOut = dayList.filter(x => x.type === 'expense').reduce((s, x) => s + x.amount, 0);
+                head = `<tr class="day-row"><td colspan="${colN}"><b>${fmt.date(t.date)}</b>${t.date === fmt.today() ? '<span class="tag tag-blue">今天</span>' : ''}<span class="day-sum">收 ${fmt.money(dIn)} · 支 ${fmt.money(dOut)} · ${dayList.length}笔</span></td></tr>`;
+              }
+              return head + `<tr>
                 <td>${t.type === 'income' ? '<span class="tag tag-green">收入</span>' : '<span class="tag tag-red">支出</span>'}</td>
                 <td><span class="tag tag-gray">${c.icon} ${c.name}</span></td>
                 <td>${p ? `<span class="tag tag-blue">${p.name}</span>` : '—'}</td>
@@ -2843,6 +2954,7 @@ VIEWS.settings = function () {
   const cid = Auth.companyId;
   const co = DB.company(cid);
   const users = DB.users();
+  const backups = Backup.list();
   const roleLabel = { boss: '老板', accountant: '会计', employee: '员工' };
   return `
     <div class="content-padded">
@@ -2884,19 +2996,35 @@ VIEWS.settings = function () {
       </div>` : ''}
 
       <div class="card"><div class="card-head"><div class="card-title">数据管理</div></div><div class="card-body">
-        <div class="text-sm text-muted mb-16">数据保存在本机浏览器,建议定期导出备份。换电脑或清理浏览器缓存前务必先备份!</div>
+        <div class="text-sm text-muted mb-16">数据保存在本机浏览器。换手机/清理浏览器缓存前,务必先导出备份文件,或确认下方快照是最新的!</div>
         <div class="flex gap-8 flex-wrap">
           <button class="btn btn-primary" data-action="data-export">⬇ 导出备份(JSON)</button>
           <button class="btn btn-ghost" data-action="data-import">⬆ 导入备份</button>
           <button class="btn btn-danger" data-action="data-reset">🗑 重置为演示数据</button>
         </div>
         <input type="file" id="hidden-file-input" hidden accept=".json" onchange="DB.import(this.files[0],()=>App.render())">
+        <div style="border-top:1px solid var(--c-border);margin-top:16px;padding-top:14px;">
+          <div class="flex justify-between" style="align-items:center;margin-bottom:6px;">
+            <b style="font-size:14px;">💾 本地快照(最多保留${Backup.MAX}份)</b>
+            <button class="btn btn-sm btn-primary" data-action="bak-now">立即备份</button>
+          </div>
+          <div class="text-sm text-muted" style="margin-bottom:4px;">每天首次改动自动快照;导入/重置/恢复前也会强制快照。误删数据可从这里一键恢复。</div>
+          ${backups.length === 0 ? `<div class="text-sm text-muted" style="padding:10px 0;">暂无快照,点上方"立即备份"创建第一份。</div>` : `
+          <div style="margin-top:6px;">
+            ${backups.map(b => `
+            <div class="flex justify-between" style="padding:8px 0;border-bottom:1px solid var(--c-border);">
+              <div class="text-sm">${fmt.datetime(b.ts)} <span class="tag ${b.reason === 'auto' ? 'tag-gray' : b.reason === 'before-danger' ? 'tag-yellow' : 'tag-blue'}">${Backup.REASON_LABEL[b.reason] || b.reason}</span> <span class="text-muted">${Math.round((b.size || 0) / 1024)}KB</span></div>
+              <div><button class="btn btn-sm btn-ghost" data-action="bak-restore" data-ts="${b.ts}">恢复</button> <button class="btn btn-sm btn-ghost" style="color:var(--c-red);" data-action="bak-del" data-ts="${b.ts}">删</button></div>
+            </div>`).join('')}
+          </div>`}
+        </div>
       </div></div>
 
       <div class="card mt-16"><div class="card-body">
         <div class="text-sm text-muted">
           <b>使用提示:</b><br>
           • 数据保存在本机浏览器(localStorage),不上传服务器,完全离线可用。<br>
+          • 每天首次改动自动生成快照,误删可在「设置→数据管理」一键恢复。<br>
           • 手机浏览器打开后可"添加到桌面",像APP一样使用。<br>
           • 多人共用时,各设备数据不互通;若需云端同步,可联系开发者升级云版本。<br>
           • 票据图片会压缩后保存,大量图片建议定期导出清理。
