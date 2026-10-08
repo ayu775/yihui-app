@@ -681,10 +681,19 @@ const DB = {
     catch (e) { console.warn('本地缓存写入失败', e); }
   },
 
-  // 修复历史数据:补齐缺失的 id(旧版"记一笔"生成的流水无 id,导致无法编辑/删除)
+  // 修复历史数据:补齐缺失的 id(部分模块旧版新增记录未生成 id,导致无法编辑/删除)
   _repairData() {
     if (!this.data) return;
     (this.data.transactions || []).forEach(t => { if (!t.id) t.id = uid('tx'); });
+    const idFix = {
+      receivables: 'r', employees: 'e', attendance: 'a', wagePayments: 'w',
+      bills: 'b', projects: 'proj', customers: 'cu', suppliers: 'sp',
+      contracts: 'ct', dailyLogs: 'dl', inventory: 'iv', invoices: 'iv2',
+      vehicles: 'veh', fuelLogs: 'fl',
+    };
+    Object.keys(idFix).forEach(k => {
+      (this.data[k] || []).forEach(x => { if (!x.id) x.id = uid(idFix[k]); });
+    });
   },
 
   // 保存:本地立刻落盘 + 防抖同步到云端(避免高频修改打爆 API)
@@ -2314,6 +2323,7 @@ const Receivables = {
       ],
       onSubmit: (d) => {
         const obj = Object.assign({}, r, d, { companyId: cid, createdAt: r.createdAt || dates.now() });
+        if (!obj.id) obj.id = uid('r');
         if (!obj.paidAmount) obj.paidAmount = 0;
         obj.status = obj.paidAmount >= obj.amount ? 'paid' : (obj.paidAmount > 0 ? 'partial' : 'unpaid');
         if (id) DB.update(obj, 'receivables'); else DB.add(obj, 'receivables');
@@ -2438,6 +2448,7 @@ const Wages = {
       ],
       onSubmit: (d) => {
         const obj = Object.assign({}, e, d, { companyId: cid });
+        if (!obj.id) obj.id = uid('e');
         if (id) DB.update(obj, 'employees'); else DB.add(obj, 'employees');
         UI.toast(id ? '已修改' : '已添加', 'success'); App.render();
       },
@@ -3452,7 +3463,7 @@ VIEWS.inventory = function () {
       <div class="card"><div class="card-head"><div class="card-title">进出记录(近30条)</div></div>
         ${logs.length === 0 ? `<div class="card-body">${UI.empty('📋', '暂无进出记录')}</div>` : `
         <div class="table-wrap"><table class="data">
-          <tr><th>日期</th><th>类型</th><th>材料</th><th class="text-right">数量</th><th>项目</th><th>备注</th></tr>
+          <tr><th>日期</th><th>类型</th><th>材料</th><th class="text-right">数量</th><th>项目</th><th>备注</th>${Auth.can('inventory') ? '<th>操作</th>' : ''}</tr>
           ${logs.map(r => {
             const p = DB.project(r.projectId);
             return `<tr>
@@ -3462,6 +3473,7 @@ VIEWS.inventory = function () {
               <td class="text-right">${fmt.num(r.quantity)} ${r.unit || ''}</td>
               <td class="cell-note">${p ? p.name : '—'}</td>
               <td class="cell-note">${r.note || '—'}</td>
+              ${Auth.can('inventory') ? `<td><button class="btn btn-sm btn-ghost" style="color:var(--c-red);" data-action="iv-del" data-id="${r.id}">删</button></td>` : ''}
             </tr>`;
           }).join('')}
         </table></div>`}
